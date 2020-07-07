@@ -52,14 +52,14 @@ def get_cpu_usage():
 def start_single_data_generator():
     gpu_id = np.argmin(get_gpu_usage())
     os.system(
-        'PYTHONPATH=. python single_data_generator.py -gpu_id {} '.format(gpu_id) + ' '.join(sys.argv[1:]) + ' &')
+        'PYTHONPATH=. python3 single_data_generator.py -gpu_id {} '.format(gpu_id) + ' '.join(sys.argv[1:]) + ' &')
     time.sleep(1)
 
 
 def start_single_learner():
     gpu_id = np.argmin(get_gpu_usage())
     os.system(
-        'PYTHONPATH=. python single_learner.py -gpu_id {} '.format(gpu_id) + ' '.join(sys.argv[1:]) + ' &')
+        'PYTHONPATH=. python3 single_learner.py -gpu_id {} '.format(gpu_id) + ' '.join(sys.argv[1:]) + ' &')
     time.sleep(1)
 
 
@@ -104,9 +104,9 @@ def on_exit():
 
 def launch_updater():
     os.system(
-        'PYTHONPATH=. python model_updater.py -gpu_id 0 ' + ' '.join(sys.argv[1:]) + ' &')
+        'PYTHONPATH=. python3 model_updater.py -gpu_id 0 ' + ' '.join(sys.argv[1:]) + ' &')
     os.system(
-        'PYTHONPATH=. python model_updater.py -gpu_id 1 ' + ' '.join(sys.argv[1:]) + ' &')
+        'PYTHONPATH=. python3 model_updater.py -gpu_id 1 ' + ' '.join(sys.argv[1:]) + ' &')
 
 
 if __name__ == '__main__':

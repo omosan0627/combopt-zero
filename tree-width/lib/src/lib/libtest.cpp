@@ -49,7 +49,7 @@ void test_random_play() {
         int sum_reward = 0;
         Graph g_ = g;
         std::vector<int> adj_black(g.num_nodes), adj_white(g.num_nodes);
-        while (!is_end(g_)) {
+        while (!is_end(adj_black)) {
             int reward;
             g_ = step(g_, rnd() % (g_.num_nodes * 2), adj_black, adj_white, reward);
             sum_reward += reward;

@@ -152,6 +152,7 @@ int random_play(const Graph& g, const std::vector<int>& adj_black, const std::ve
         int u = p.first, v = p.second;
         if (color[u] != color[v]) ret++;
     }
+	std::cout << ret << std::endl;
     return ret;
 }
 
@@ -290,6 +291,7 @@ void generate_train_data(const std::string& filename) {
         assert(graph.adj_list == root->graph.adj_list);
         step_cnt++;
     }
+	std::cout << "omo" << std::endl;
     int size = rewards.size();
     for (int i = size - 2; i >= 0; i--) rewards[i] += rewards[i + 1];
     for (int i = 0; i < size; i++) rewards[i] = normalize(rewards[i], means[i], stds[i]);

@@ -105,9 +105,11 @@ if __name__ == '__main__':
             for graph in test_graphs:
                 api.SetCurrentTestGraph(graph)
                 best_score += api.Test()
+        else:
+            best_score = 10000000000000
 
         print('[updater] {} vs {}'.format(score, best_score), flush=True)
-        if score > best_score or (score == best_score and np.random.randint(0, 2)):
+        if score < best_score or (score == best_score and np.random.randint(0, 2)):
             update_best(opt, filename)
             print('[updater] best updated!', flush=True)
         os.system('rm {}/{}'.format(save_dir, filename))

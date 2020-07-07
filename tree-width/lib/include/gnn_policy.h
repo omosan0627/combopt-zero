@@ -11,13 +11,12 @@
 torch::Tensor make_input_feat(const Graph& graph, const std::vector<int>& adj_black,
                               const std::vector<int>& adj_white) {
     int n = graph.num_nodes;
-    std::vector<float> feat(n * 3);
+    std::vector<float> feat(n * 2);
     for (int i = 0; i < n; i++) {
-        feat[i * 3] = 1;
-        feat[i * 3 + 1] = adj_black[i];
-        feat[i * 3 + 2] = adj_white[i];
+        feat[i * 2] = 1;
+        feat[i * 2 + 1] = adj_black[i];
     }
-    return from_float32_array(&(*(feat.begin())), {n, 3});
+    return from_float32_array(&(*(feat.begin())), {n, 2});
 }
 
 template <class GNN>
@@ -27,7 +26,7 @@ public:
     torch::optim::Adam optimizer;
     // TODO: Adamの初期化もっときれいに書けそう
     GNNPolicy()
-        : gnn(3, 4),
+        : gnn(2, 2),
           optimizer(
               gnn->parameters(),
               torch::optim::AdamOptions(cfg::learning_rate).weight_decay(cfg::weight_decay)) {  // input_dim, output_dim
@@ -35,32 +34,27 @@ public:
         optimizer = torch::optim::Adam(gnn->parameters(),
                                        torch::optim::AdamOptions(cfg::learning_rate).weight_decay(cfg::weight_decay));
     }
-    std::pair<torch::Tensor, torch::Tensor> infer_one(const Graph& graph, const std::vector<int>& adj_black,
-                                                      const std::vector<int>& adj_white, bool no_grad = true) override {
+    std::pair<torch::Tensor, torch::Tensor> infer_one(const Graph& graph, const std::vector<int>& adj_black, const std::vector<int>& adj_white, bool no_grad = true) override {
         assert(graph.num_nodes > 0);
         if (no_grad) {
             torch::NoGradGuard guard;
             torch::Tensor x = make_input_feat(graph, adj_black, adj_white);
             torch::Tensor y = gnn->forward(x, graph.to_adj_tensor());
             torch::Tensor policy_pred_black = y.narrow(1, 0, 1).reshape({-1});
-            torch::Tensor policy_pred_white = y.narrow(1, 1, 1).reshape({-1});
-            torch::Tensor policy_pred = torch::cat({policy_pred_black, policy_pred_white}, 0);
+            torch::Tensor policy_pred = policy_pred_black;
             policy_pred = policy_pred.softmax(0);
-            torch::Tensor value_pred_black = y.narrow(1, 2, 1).reshape({-1});
-            torch::Tensor value_pred_white = y.narrow(1, 3, 1).reshape({-1});
-            torch::Tensor value_pred = torch::cat({value_pred_black, value_pred_white}, 0);
+            torch::Tensor value_pred_black = y.narrow(1, 1, 1).reshape({-1});
+            torch::Tensor value_pred = value_pred_black;
             value_pred = normalize(value_pred);
             return {policy_pred, value_pred};
         } else {
-            torch::Tensor x = make_input_feat(graph, adj_black, adj_white);
+			torch::Tensor x = make_input_feat(graph, adj_black, adj_white);
             torch::Tensor y = gnn->forward(x, graph.to_adj_tensor());
             torch::Tensor policy_pred_black = y.narrow(1, 0, 1).reshape({-1});
-            torch::Tensor policy_pred_white = y.narrow(1, 1, 1).reshape({-1});
-            torch::Tensor policy_pred = torch::cat({policy_pred_black, policy_pred_white}, 0);
+            torch::Tensor policy_pred = policy_pred_black;
             policy_pred = policy_pred.softmax(0);
-            torch::Tensor value_pred_black = y.narrow(1, 2, 1).reshape({-1});
-            torch::Tensor value_pred_white = y.narrow(1, 3, 1).reshape({-1});
-            torch::Tensor value_pred = torch::cat({value_pred_black, value_pred_white}, 0);
+            torch::Tensor value_pred_black = y.narrow(1, 1, 1).reshape({-1});
+            torch::Tensor value_pred = value_pred_black;
             value_pred = normalize(value_pred);
             return {policy_pred, value_pred};
         }

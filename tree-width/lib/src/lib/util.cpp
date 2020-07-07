@@ -71,7 +71,7 @@ void save_train_data(const std::string& filename, const TrainBatch& batch) {
         }
         f << '\n';
         f << batch.actions[i] << '\n';
-        assert((int)batch.pis[i].size() == batch.graphs[i].num_nodes * 2);
+        assert((int)batch.pis[i].size() == batch.graphs[i].num_nodes);
         for (float a : batch.pis[i]) {
             f << std::setprecision(10) << a << ' ';
         }
@@ -106,8 +106,8 @@ TrainBatch load_train_data(const std::string& filename) {
         adj_whites[i].resize(n);
         for (int j = 0; j < n; j++) f >> adj_whites[i][j];
         f >> actions[i];
-        pis[i].resize(n * 2);
-        for (int j = 0; j < n * 2; j++) {
+        pis[i].resize(n);
+        for (int j = 0; j < n; j++) {
             f >> pis[i][j];
         }
         f >> rewards[i];

@@ -17,6 +17,7 @@
 #include "policy.h"
 #include "train_batch.h"
 #include "util.h"
+#include "unistd.h"
 
 typedef std::tuple<std::vector<std::vector<int>>, std::vector<int>, std::vector<int>> State;
 
@@ -26,15 +27,15 @@ std::unordered_map<hash_t, std::pair<State, GNNInfo>> PolicyValueMemo;
 void Node::init() {
     // after graph, adj_black, adj_white are set
     num_nodes = graph.num_nodes;
-    if (is_end(graph)) return;
-    children.resize(num_nodes * 2);
-    visit_cnt.resize(num_nodes * 2);
+    if (is_end(adj_black)) return;
+    children.resize(num_nodes);
+    visit_cnt.resize(num_nodes);
     visit_cnt_sum = 0;
     adj_hash_labeled = get_adj_hash_labeled(graph, adj_black, adj_white);
     std::tie(reward_mean, reward_std) = get_mean_std();
     std::tie(policy, value) = get_gnn_estimate();
-    assert((int)policy.size() == num_nodes * 2);
-    assert((int)value.size() == num_nodes * 2);
+    assert((int)policy.size() == num_nodes);
+    assert((int)value.size() == num_nodes);
 }
 
 Node::Node() {}
@@ -82,16 +83,17 @@ std::vector<float> random_dirichlet(int n, double alpha) {
 }
 
 int Node::best_child(bool add_noise) {
-    std::vector<float> ucb(num_nodes * 2);
+    std::vector<float> ucb(num_nodes);
     std::vector<float> fixed_policy = policy;
     if (add_noise) {
-        std::vector<float> noise = random_dirichlet(num_nodes * 2, cfg::dirichlet_alpha);
-        for (int i = 0; i < num_nodes * 2; i++) {
+        std::vector<float> noise = random_dirichlet(num_nodes, cfg::dirichlet_alpha);
+        for (int i = 0; i < num_nodes; i++) {
             fixed_policy[i] = fixed_policy[i] * (1 - cfg::dirichlet_eps) + noise[i] * cfg::dirichlet_eps;
         }
     }
-    for (int i = 0; i < num_nodes * 2; i++) {
-        ucb[i] = value[i] + cfg::alpha * std::sqrt(visit_cnt_sum) * fixed_policy[i] / (1 + visit_cnt[i]);
+    for (int i = 0; i < num_nodes; i++) {
+		if(adj_black[i]) ucb[i] = -114514.1919;
+        else ucb[i] = value[i] + cfg::alpha * std::sqrt(visit_cnt_sum) * fixed_policy[i] / (1 + visit_cnt[i]);
     }
     return randomized_argmax(ucb);
 }
@@ -113,45 +115,78 @@ float unnormalize(float v, float m, float s) {
     }
 }
 
-float Node::state_value() {
-    if (is_end(graph)) return 0;
-    return unnormalize(max(value), reward_mean, reward_std);
-}
+// float Node::state_value() {
+//     if (is_end(graph)) return 0;
+//     return unnormalize(max(value), reward_mean, reward_std);
+// }
 
 std::vector<float> Node::pi(float tau) {
-    std::vector<float> prob(num_nodes * 2);
+    std::vector<float> prob(num_nodes);
     int max_visit_cnt = *std::max_element(visit_cnt.begin(), visit_cnt.end());
     if (tau == 0) {
         float sum = 0;
-        for (int i = 0; i < num_nodes * 2; i++) {
+        for (int i = 0; i < num_nodes; i++) {
             if (visit_cnt[i] == max_visit_cnt) {
                 prob[i] = 1;
                 sum += 1;
             }
         }
-        for (int i = 0; i < num_nodes * 2; i++) prob[i] /= sum;
+        for (int i = 0; i < num_nodes; i++) prob[i] /= sum;
         return prob;
     }
-    for (int i = 0; i < num_nodes * 2; i++) prob[i] = std::pow(visit_cnt[i], 1.0 / tau);
+    for (int i = 0; i < num_nodes; i++) prob[i] = std::pow(visit_cnt[i], 1.0 / tau);
     float sum = std::accumulate(prob.begin(), prob.end(), 0.0);
-    for (int i = 0; i < num_nodes * 2; i++) prob[i] /= sum;
+    for (int i = 0; i < num_nodes; i++) prob[i] /= sum;
     return prob;
 }
 
+int maxclique_on_chordal(const Graph& g) {
+	int res = 0;
+	int n = g.num_nodes;
+	std::vector<int> deg(n);
+	std::vector<int> used(n, 0);
+	std::set<std::pair<int, int>> S;
+	for(int v = 0; v < n; v++) {
+		deg[v] = (int)g.adj_list[v].size();
+		S.insert(std::make_pair(deg[v], v));
+	}
+	for(int _ = 0; _ < n; _++) {
+		auto it = S.begin();
+		res = std::max(res, it->first);
+		int v = it->second;
+		assert(!used[v]);
+		used[v] = 1;
+		for(auto& u: g.adj_list[v]) {
+			if(!used[u]) {
+				auto jt = S.find(std::make_pair(deg[u], u));
+				S.erase(jt);
+				deg[u]--;
+				S.insert(std::make_pair(deg[u], u));
+			}
+		}
+		S.erase(it);
+		deg[v] = 0;
+	}
+	return res - 1;
+}
+
+
 int random_play(const Graph& g, const std::vector<int>& adj_black, const std::vector<int>& adj_white) {
     int n = g.num_nodes;
-    std::vector<int> color(n);
-    for (int i = 0; i < n; i++) color[i] = rnd() & 1;
-    int ret = 0;
-    // removed & remain
-    for (int i = 0; i < n; i++) {
-        ret += (color[i] ? adj_black : adj_white)[i];
-    }
-    // remain & remain
-    for (auto& p : g.edge_list) {
-        int u = p.first, v = p.second;
-        if (color[u] != color[v]) ret++;
-    }
+	Graph gg = g;
+	std::vector<int> perm;
+	for(int i = 0; i < n; i++) {
+		if(!adj_black[i]) perm.push_back(i);
+	}
+	std::shuffle(perm.begin(), perm.end(), rnd);
+	std::vector<int> adjb = adj_black;
+	std::vector<int> adjw = adj_white;
+
+	int ret = 0;
+	for(int v: perm) {
+		gg = step(gg, v, adjb, adjw, ret);
+	}
+	ret = maxclique_on_chordal(gg);
     return ret;
 }
 
@@ -185,10 +220,11 @@ void update_parent(std::shared_ptr<Node> node, float v) {
     parent->visit_cnt_sum++;
 }
 
+
 float rollout(std::shared_ptr<Node> root, bool add_noise) {
     std::shared_ptr<Node> node = root;
     bool first = true;
-    while (!is_end(node->graph)) {
+    while (!is_end(node->adj_black)) {
         int act = node->best_child(first && add_noise);
         first = false;
         if (node->children[act]) {
@@ -198,18 +234,19 @@ float rollout(std::shared_ptr<Node> root, bool add_noise) {
             break;
         }
     }
-    float v = node->state_value();
-    while (node != root) {
-        v += node->last_reward;
-        update_parent(node, v);
-        node = node->parent;
-    }
-    return v;
+	int ret = maxclique_on_chordal(node->graph);
+	while(node != root) {
+		update_parent(node, ret);
+		node = node->parent;
+	}
+    return ret;
 }
 
 std::vector<float> get_improved_pi(std::shared_ptr<Node> root, float tau, bool add_noise = false) {
     assert(root->num_nodes);
-    while (root->visit_cnt_sum < std::ceil(cfg::rollout_coef * root->num_nodes)) rollout(root, add_noise);
+    while (root->visit_cnt_sum < std::ceil(cfg::rollout_coef * root->num_nodes)) {
+		rollout(root, add_noise);
+	}
     return root->pi(tau);
 }
 
@@ -233,18 +270,56 @@ int test() {
     Graph graph = CurrentTestGraph;
     int ret = 0;
     std::vector<int> adj_black(graph.num_nodes), adj_white(graph.num_nodes);
-    while (!is_end(graph)) {
+    while (!is_end(adj_black)) {
         auto policy_value = global_policy->infer_one(graph, adj_black, adj_white);
-        int action = randomized_argmax(tensor_to_vector<float>(policy_value.first));
+		auto vec = tensor_to_vector<float>(policy_value.first);
+		// std::cout << "-----------------" << std::endl;
+		for(int i = 0; i < (int)vec.size(); i++) {
+			if(adj_black[i]) vec[i] = -114514.1919;
+		}
+        int action = randomized_argmax(vec);
         int reward;
         graph = step(graph, action, adj_black, adj_white, reward);
         ret += reward;
     }
-    return ret;
+    return maxclique_on_chordal(graph);
 }
 
 int test_by_mcts() {
-    return 0;
+	//minfill heuristics, verified by https://github.com/xuzijian629/pace2020/blob/master/src/lib/tw.cpp
+    Graph g = CurrentTestGraph;
+	int n = g.num_nodes;
+	std::vector<int> used(n, 0), adjw(n, 0);
+	int tmp = 0;
+	std::vector<int> at;
+	for(int _ = 0; _ < n; _++) {
+		int best = 11451419;
+		std::set<std::pair<int, int>> S(g.edge_list.begin(), g.edge_list.end());
+		for(int v = 0; v < n; v++) {
+			if(used[v]) continue;
+			int cnt = 0;
+			for(int i = 0; i < (int)g.adj_list[v].size(); i++) {
+				for(int j = i + 1; j < (int)g.adj_list[v].size(); j++) {
+					int u = g.adj_list[v][i], w = g.adj_list[v][j];
+					if(u > w) std::swap(u, w);
+					if(!used[u] && !used[w] && !S.count(std::make_pair(u, w))) {
+						cnt++;
+					}
+				}
+			}
+			if(best > cnt) {
+				best = cnt;
+				at.clear(); at.push_back(v);
+			}
+			else if(best == cnt) at.push_back(v);
+		}
+		// int action = at[0];
+		int action = at[rnd() % ((int)at.size())];
+		// std::cout << (int)g.edge_list.size() << " " << action << " " << "omo" << std::endl;
+		g = step(g, action, used, adjw, tmp);
+	}
+	std::cout << (int)g.edge_list.size() << std::endl;
+    return maxclique_on_chordal(g);
 }
 
 void generate_train_data(const std::string& filename) {
@@ -259,7 +334,7 @@ void generate_train_data(const std::string& filename) {
     int step_cnt = 0;
     std::shared_ptr<Node> root = std::make_shared<Node>(graph);
     std::vector<int> adj_black(graph.num_nodes), adj_white(graph.num_nodes);
-    while (!is_end(graph)) {
+    while (!is_end(adj_black)) {
         graphs.push_back(graph);
         adj_blacks.push_back(adj_black);
         adj_whites.push_back(adj_white);
@@ -277,8 +352,10 @@ void generate_train_data(const std::string& filename) {
         assert(graph.adj_list == root->graph.adj_list);
         step_cnt++;
     }
+	int ret = maxclique_on_chordal(graph);
+	std::cout << "generate_train_data " << ret << " " <<  graph.num_nodes << std::endl;
     int size = rewards.size();
-    for (int i = size - 2; i >= 0; i--) rewards[i] += rewards[i + 1];
+    for (int i = size - 1; i >= 0; i--) rewards[i] = ret;
     for (int i = 0; i < size; i++) rewards[i] = normalize(rewards[i], means[i], stds[i]);
     TrainBatch batch(graphs, adj_blacks, adj_whites, actions, pis, rewards);
     save_train_data(filename, batch);
